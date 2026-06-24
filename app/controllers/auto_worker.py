@@ -17,7 +17,7 @@ from app.prompts.story_bible_prompt import build_story_bible_prompt
 from app.prompts.outline_prompt import build_outline_prompt
 from app.prompts.write_prompt import build_hook_prompt, build_chapter_prompt
 from app.prompts.script_evaluation_prompt import build_script_evaluation_prompt
-from app.prompts.final_repair_prompt import build_final_repair_prompt
+from app.prompts.final_repair_prompt import build_final_repair_prompt, build_section_repair_prompt
 from app.prompts.segment_script_prompt import build_segment_script_prompt
 from app.prompts.thumbnail_prompt import build_thumbnail_prompt_prompt
 from app.core.prompt_value_mapper import PromptValueMapper
@@ -413,11 +413,13 @@ class AutoWorker(QObject):
         self.project.outline = {}
         self.project.chapters = []
         self.project.script_evaluation = ""
+        self.project.script_evaluation_signature = ""
         self.project.final_repair = ""
         self.project.segment_script = ""
         self.project.segment_signature = ""
         self.project.thumbnail_prompt = ""
         self.project.seo_meta = ""
+        self.project.thumbnail_signature = ""
 
         for key in list(self.project.step_status.keys()):
             if (
@@ -449,6 +451,16 @@ class AutoWorker(QObject):
             "niche": getattr(self.project, "niche", "Family Betrayal"),
         })
 
+    def current_script_evaluation_signature(self, new_script: str) -> str:
+        return self._signature({
+            "prompt_version": "script_evaluation_v2_canon_repair_mode",
+            "title": self.project.title,
+            "original_script": self.project.transcript,
+            "new_script": new_script,
+            "story_bible": self.project.story_bible,
+            "outline": self.project.outline,
+        })
+
     def clear_all_generated_outputs(self):
         self.project.input_analysis = {}
         self.project.premises = []
@@ -459,11 +471,13 @@ class AutoWorker(QObject):
         self.project.raw_responses = {}
         self.project.step_status = {}
         self.project.script_evaluation = ""
+        self.project.script_evaluation_signature = ""
         self.project.final_repair = ""
         self.project.segment_script = ""
         self.project.segment_signature = ""
         self.project.thumbnail_prompt = ""
         self.project.seo_meta = ""
+        self.project.thumbnail_signature = ""
 
     def clear_settings_dependent_outputs(self):
         self.project.premises = []
@@ -472,11 +486,13 @@ class AutoWorker(QObject):
         self.project.outline = {}
         self.project.chapters = []
         self.project.script_evaluation = ""
+        self.project.script_evaluation_signature = ""
         self.project.final_repair = ""
         self.project.segment_script = ""
         self.project.segment_signature = ""
         self.project.thumbnail_prompt = ""
         self.project.seo_meta = ""
+        self.project.thumbnail_signature = ""
 
         for key in list(self.project.raw_responses.keys()):
             if key != "01_input_analysis":
@@ -809,11 +825,13 @@ class AutoWorker(QObject):
         if self.project.chapters:
             self.project.chapters = []
             self.project.script_evaluation = ""
+            self.project.script_evaluation_signature = ""
             self.project.final_repair = ""
             self.project.segment_script = ""
             self.project.segment_signature = ""
             self.project.thumbnail_prompt = ""
             self.project.seo_meta = ""
+            self.project.thumbnail_signature = ""
             self.autosave()
 
         chapter_count = self.get_chapter_count()
@@ -1077,11 +1095,6 @@ class AutoWorker(QObject):
     def ensure_script_evaluation(self):
         step = "17_script_evaluation"
 
-        if getattr(self.project, "script_evaluation", ""):
-            self.mark_step(step, "Bỏ qua", "Đã có đánh giá script")
-            self.status("Đã có đánh giá script. Bỏ qua.", 96)
-            return
-
         self.status("Đang so sánh script gốc và script mới...", 94)
 
         new_script = self.build_new_script_text()
@@ -1089,8 +1102,20 @@ class AutoWorker(QObject):
             self.mark_step(step, "Lỗi", "Không có script mới để đánh giá")
             raise ValueError("Không có script mới để đánh giá.")
 
+        signature = self.current_script_evaluation_signature(new_script)
+
+        if (
+            getattr(self.project, "script_evaluation", "")
+            and getattr(self.project, "script_evaluation_signature", "") == signature
+        ):
+            self.mark_step(step, "Bỏ qua", "Đã có đánh giá script")
+            self.status("Đã có đánh giá script. Bỏ qua.", 96)
+            return
+
         prompt = build_script_evaluation_prompt(
             title=self.project.title,
+            story_bible=self.project.story_bible,
+            outline=self.project.outline,
             original_script=self.project.transcript,
             new_script=new_script,
         )
@@ -1103,17 +1128,78 @@ class AutoWorker(QObject):
         )
 
         self.project.script_evaluation = response or ""
+        self.project.script_evaluation_signature = signature
+        self.project.final_repair = ""
+        self.project.segment_script = ""
+        self.project.segment_signature = ""
+        self.project.thumbnail_prompt = ""
+        self.project.seo_meta = ""
+        self.project.thumbnail_signature = ""
         self.project.step_status["script_evaluation"] = "done"
+        self.project.step_status.pop("final_repair", None)
+        self.project.step_status.pop("segment_script", None)
+        self.project.step_status.pop("thumbnail_prompt", None)
+        self.project.step_status.pop("seo_meta", None)
         self.autosave()
 
         self.mark_step(step, "Hoàn tất", "Hoàn tất đánh giá script", response)
         self.status("Hoàn tất đánh giá script.", 98)
 
     def evaluation_needs_final_repair(self) -> bool:
-        report = (getattr(self.project, "script_evaluation", "") or "").lower()
+        raw_report = getattr(self.project, "script_evaluation", "") or ""
+        report = raw_report.lower()
 
         if not report:
             return False
+
+        repair_mode_match = re.search(
+            r"mode\s*:\s*(skip|canon_restore|chapter_repair|full_repair)",
+            raw_report,
+            flags=re.IGNORECASE,
+        )
+        if repair_mode_match:
+            repair_mode = repair_mode_match.group(1).lower()
+            if repair_mode in {"canon_restore", "chapter_repair", "full_repair"}:
+                return True
+            if repair_mode == "skip":
+                return False
+
+        canon_conflict_patterns = [
+            r"structural\s+conflict",
+            r"canon\s+conflict",
+            r"violates\s+(?:the\s+)?story\s+bible",
+            r"changed\s+from\s+father\s+to\s+mother",
+            r"changed\s+from\s+mother\s+to\s+father",
+            r"antagonist\s+changed",
+            r"main\s+character\s+changed",
+            r"core\s+(?:betrayal|conflict|payoff|reveal)\s+changed",
+        ]
+        if any(re.search(pattern, report, flags=re.IGNORECASE) for pattern in canon_conflict_patterns):
+            return True
+
+        verdict_match = re.search(
+            r"better\s*/\s*equal\s*/\s*worse\s*:\s*(better|equal|worse)",
+            raw_report,
+            flags=re.IGNORECASE,
+        )
+        if verdict_match and verdict_match.group(1).lower() in {"better", "equal"}:
+            return False
+
+        original_score_match = re.search(
+            r"score\s+original\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+            raw_report,
+            flags=re.IGNORECASE,
+        )
+        new_score_match = re.search(
+            r"score\s+new\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+            raw_report,
+            flags=re.IGNORECASE,
+        )
+        if original_score_match and new_score_match:
+            original_score = float(original_score_match.group(1))
+            new_score = float(new_score_match.group(1))
+            if new_score >= original_score:
+                return False
 
         triggers = [
             "continuity / logic issues",
@@ -1131,6 +1217,186 @@ class AutoWorker(QObject):
         ]
 
         return any(trigger in report for trigger in triggers)
+
+    def evaluation_repair_mode(self) -> str:
+        report = getattr(self.project, "script_evaluation", "") or ""
+        mode_match = re.search(
+            r"mode\s*:\s*(skip|canon_restore|chapter_repair|full_repair)",
+            report,
+            flags=re.IGNORECASE,
+        )
+        if mode_match:
+            return mode_match.group(1).lower()
+
+        if re.search(r"canon\s+conflict|structural\s+conflict|violates\s+(?:the\s+)?story\s+bible", report, flags=re.IGNORECASE):
+            return "canon_restore"
+
+        return "chapter_repair"
+
+    def final_repair_should_use_full_script(self, script_text: str) -> bool:
+        mode = self.evaluation_repair_mode()
+        if mode != "full_repair":
+            return False
+
+        return ContentNormalizer.count_words(script_text) <= 5500
+
+    def repair_target_keys(self) -> list:
+        report = getattr(self.project, "script_evaluation", "") or ""
+        lower_report = report.lower()
+
+        all_keys = []
+        if self.find_chapter("hook"):
+            all_keys.append("hook")
+        all_keys.extend(range(1, self.get_chapter_count() + 1))
+
+        if re.search(r"affected\s+chapters\s*:\s*(all|entire|whole)", lower_report, flags=re.IGNORECASE):
+            return all_keys
+
+        targets = set()
+        if re.search(r"\bhook\b|\bopening\s+hook\b", lower_report, flags=re.IGNORECASE):
+            targets.add("hook")
+
+        for match in re.finditer(r"\bchapter\s*(\d{1,2})\b", lower_report, flags=re.IGNORECASE):
+            try:
+                chapter_number = int(match.group(1))
+            except Exception:
+                continue
+            if 1 <= chapter_number <= self.get_chapter_count():
+                targets.add(chapter_number)
+
+        if targets:
+            return [key for key in all_keys if key in targets]
+
+        mode = self.evaluation_repair_mode()
+        if mode in {"canon_restore", "full_repair"}:
+            return all_keys
+
+        return [key for key in all_keys if key != "hook"]
+
+    def repair_context_for_key(self, key) -> tuple[str, str]:
+        ordered = []
+        if self.find_chapter("hook"):
+            ordered.append("hook")
+        ordered.extend(range(1, self.get_chapter_count() + 1))
+
+        if key not in ordered:
+            return "", ""
+
+        index = ordered.index(key)
+        previous_text = ""
+        next_text = ""
+
+        if index > 0:
+            previous = self.find_chapter(ordered[index - 1])
+            if previous:
+                previous_text = (previous.get("text") or "")[-1200:]
+
+        if index + 1 < len(ordered):
+            next_item = self.find_chapter(ordered[index + 1])
+            if next_item:
+                next_text = (next_item.get("text") or "")[:1200]
+
+        return previous_text, next_text
+
+    def repair_single_section(self, key, step: str, repair_mode: str):
+        chapter = self.find_chapter(key)
+        if not chapter:
+            return
+
+        is_hook = key == "hook" or chapter.get("chapter_number") == "hook" or chapter.get("type") == "hook"
+        if is_hook:
+            section_heading = "Hook"
+            section_text = chapter.get("text", "")
+            target_words = max(120, int(self.get_target_words() * 0.08))
+            task_suffix = "hook"
+        else:
+            chapter_number = int(chapter.get("chapter_number"))
+            chapter_title = chapter.get("title") or self.get_outline_title(chapter_number)
+            section_heading = ContentNormalizer.build_chapter_heading(chapter_number, chapter_title)
+            section_text = chapter.get("text", "")
+            target_words = self.get_chapter_target_words(chapter_number)
+            task_suffix = f"chapter_{chapter_number:02d}"
+
+        previous_context, next_context = self.repair_context_for_key(key)
+
+        prompt = build_section_repair_prompt(
+            title=self.project.title,
+            story_bible=self.project.story_bible,
+            outline=self.project.outline,
+            evaluation_report=self.project.script_evaluation,
+            repair_mode=repair_mode.upper(),
+            section_heading=section_heading,
+            section_text=section_text,
+            previous_context=previous_context,
+            next_context=next_context,
+            target_words=target_words,
+        )
+
+        response = self.send_prompt(
+            step,
+            f"08_final_repair_{task_suffix}",
+            prompt,
+            expect_json=False,
+        )
+
+        if is_hook:
+            repaired_text = ContentNormalizer.normalize_hook(response)
+            if not repaired_text:
+                self.mark_step(step, "Lỗi", "Không lấy được repaired Hook", response)
+                raise ValueError("Không lấy được repaired Hook.")
+
+            self.upsert_chapter({
+                "chapter_number": "hook",
+                "type": "hook",
+                "title": "Hook",
+                "heading": "Hook",
+                "text": repaired_text,
+                "word_count": ContentNormalizer.count_words(repaired_text),
+                "status": "done",
+            })
+            return
+
+        chapter_number = int(chapter.get("chapter_number"))
+        chapter_title = chapter.get("title") or self.get_outline_title(chapter_number)
+        repaired_text = ContentNormalizer.normalize_chapter(
+            response=response,
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+        )
+        if not repaired_text:
+            self.mark_step(step, "Lỗi", f"Không lấy được repaired Chapter {chapter_number}", response)
+            raise ValueError(f"Không lấy được repaired Chapter {chapter_number}.")
+
+        self.upsert_chapter({
+            "chapter_number": chapter_number,
+            "title": chapter_title or f"Chapter {chapter_number}",
+            "heading": ContentNormalizer.build_chapter_heading(chapter_number, chapter_title),
+            "text": repaired_text,
+            "word_count": ContentNormalizer.count_words(repaired_text),
+            "status": "done",
+        })
+
+    def repair_script_by_sections(self, step: str) -> str:
+        repair_mode = self.evaluation_repair_mode()
+        targets = self.repair_target_keys()
+
+        if not targets:
+            return self.build_new_script_text()
+
+        self.mark_step(
+            step,
+            "Đang chạy",
+            f"Repair theo section ({repair_mode}): {', '.join(str(target) for target in targets)}",
+        )
+
+        for key in targets:
+            self.check_stop()
+            label = "Hook" if key == "hook" else f"Chapter {key}"
+            self.status(f"Đang final repair {label}...", 98)
+            self.repair_single_section(key, step, repair_mode)
+            self.autosave()
+
+        return self.build_new_script_text()
 
     def ensure_final_repair(self):
         step = "18_final_repair"
@@ -1154,6 +1420,24 @@ class AutoWorker(QObject):
         if not current_script.strip():
             self.mark_step(step, "Lỗi", "Không có script để final repair")
             raise ValueError("Không có script để final repair.")
+
+        if not self.final_repair_should_use_full_script(current_script):
+            repaired_script = self.repair_script_by_sections(step)
+            self.project.final_repair = repaired_script
+            self.project.segment_script = ""
+            self.project.segment_signature = ""
+            self.project.thumbnail_prompt = ""
+            self.project.seo_meta = ""
+            self.project.thumbnail_signature = ""
+            self.project.step_status["final_repair"] = "done"
+            self.project.step_status.pop("segment_script", None)
+            self.project.step_status.pop("thumbnail_prompt", None)
+            self.project.step_status.pop("seo_meta", None)
+            self.autosave()
+
+            self.mark_step(step, "Hoàn tất", "Đã sửa final script theo từng section", repaired_script)
+            self.status("Hoàn tất final repair theo từng section.", 98)
+            return
 
         prompt = build_final_repair_prompt(
             title=self.project.title,
@@ -1181,9 +1465,13 @@ class AutoWorker(QObject):
 
         self.project.chapters = repaired_chapters
         self.project.final_repair = repaired_script
+        self.project.segment_script = ""
+        self.project.segment_signature = ""
         self.project.thumbnail_prompt = ""
         self.project.seo_meta = ""
+        self.project.thumbnail_signature = ""
         self.project.step_status["final_repair"] = "done"
+        self.project.step_status.pop("segment_script", None)
         self.project.step_status.pop("thumbnail_prompt", None)
         self.project.step_status.pop("seo_meta", None)
         self.autosave()
@@ -1212,10 +1500,21 @@ class AutoWorker(QObject):
 
     def current_segment_signature(self, script_text: str) -> str:
         return self._signature({
+            "prompt_version": "segment_v3_chapter_title_and_speaker_brackets",
             "script_text": script_text,
             "hook_segment_words": self.hook_segment_words,
             "chapter_segment_words": self.chapter_segment_words,
             "narrator_name": self.get_narrator_name(),
+        })
+
+    def current_thumbnail_signature(self, script_text: str) -> str:
+        return self._signature({
+            "prompt_version": "thumbnail_v3_story_specific_copy",
+            "title": self.project.title,
+            "niche": getattr(self.project, "niche", "Family Betrayal"),
+            "story_bible": self.project.story_bible,
+            "outline": self.project.outline,
+            "script_text": script_text,
         })
 
     def ensure_segment_script(self):
@@ -1340,17 +1639,19 @@ class AutoWorker(QObject):
     def ensure_thumbnail_prompt(self):
         step = "20_thumbnail_prompt"
 
-        if getattr(self.project, "seo_meta", ""):
-            self.mark_step(step, "Bỏ qua", "Đã có SEO meta và thumbnail prompt")
-            self.status("Đã có SEO meta và thumbnail prompt. Bỏ qua.", 99)
-            return
-
         self.status("Đang tạo SEO meta và prompt thumbnail...", 98)
 
         new_script = self.build_new_script_text()
         if not new_script.strip():
             self.mark_step(step, "Lỗi", "Không có script mới để tạo SEO meta")
             raise ValueError("Không có script mới để tạo SEO meta.")
+
+        signature = self.current_thumbnail_signature(new_script)
+
+        if getattr(self.project, "seo_meta", "") and getattr(self.project, "thumbnail_signature", "") == signature:
+            self.mark_step(step, "Bỏ qua", "Đã có SEO meta và thumbnail prompt")
+            self.status("Đã có SEO meta và thumbnail prompt. Bỏ qua.", 99)
+            return
 
         prompt = build_thumbnail_prompt_prompt(
             title=self.project.title,
@@ -1369,6 +1670,7 @@ class AutoWorker(QObject):
 
         self.project.thumbnail_prompt = response or ""
         self.project.seo_meta = response or ""
+        self.project.thumbnail_signature = signature
         self.project.step_status["thumbnail_prompt"] = "done"
         self.project.step_status["seo_meta"] = "done"
         self.autosave()

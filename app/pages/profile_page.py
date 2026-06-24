@@ -1,4 +1,4 @@
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFileDialog,
@@ -132,8 +132,9 @@ class ProfilePage(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(6, 112)
+        self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table, 1)
 
@@ -208,16 +209,16 @@ class ProfilePage(QWidget):
 
             open_btn = QPushButton("Mở")
             open_btn.setObjectName("ProfileTableOpenButton")
-            open_btn.setFixedSize(76, 30)
+            open_btn.setFixedSize(72, 30)
+            open_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             open_btn.setProperty("profile_name", name)
             open_btn.clicked.connect(self.emit_open_profile)
 
             button_cell = QWidget()
             button_layout = QHBoxLayout(button_cell)
-            button_layout.setContentsMargins(8, 4, 8, 4)
-            button_layout.addStretch()
+            button_layout.setContentsMargins(0, 0, 0, 0)
+            button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             button_layout.addWidget(open_btn)
-            button_layout.addStretch()
             self.table.setCellWidget(row, 6, button_cell)
 
         if profiles and self.table.currentRow() < 0:

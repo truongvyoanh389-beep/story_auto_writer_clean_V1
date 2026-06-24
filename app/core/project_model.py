@@ -32,7 +32,9 @@ class StoryProject:
 
     input_signature: str = ""
     settings_signature: str = ""
+    script_evaluation_signature: str = ""
     segment_signature: str = ""
+    thumbnail_signature: str = ""
 
     input_analysis: dict[str, Any] = field(default_factory=dict)
     premises: list[dict[str, Any]] = field(default_factory=list)
@@ -93,7 +95,9 @@ class StoryProject:
         project.ai_chat_url = data.get("ai_chat_url", "")
         project.input_signature = data.get("input_signature", "")
         project.settings_signature = data.get("settings_signature", "")
+        project.script_evaluation_signature = data.get("script_evaluation_signature", "")
         project.segment_signature = data.get("segment_signature", "")
+        project.thumbnail_signature = data.get("thumbnail_signature", "")
 
         project.input_analysis = data.get("input_analysis", {})
         project.premises = data.get("premises", [])

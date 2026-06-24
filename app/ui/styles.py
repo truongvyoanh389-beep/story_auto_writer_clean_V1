@@ -188,8 +188,8 @@ QPushButton#ProfileTableOpenButton {
     padding: 0px;
     color: #ffffff;
     font-weight: 600;
-    min-width: 76px;
-    max-width: 76px;
+    min-width: 72px;
+    max-width: 72px;
     min-height: 30px;
     max-height: 30px;
 }
